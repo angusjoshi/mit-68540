@@ -1,10 +1,15 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-
+import (
+	"fmt"
+	"hash/fnv"
+	"io"
+	"log"
+	"net/rpc"
+	"os"
+	"time"
+  "encoding/json"
+)
 
 //
 // Map functions return a slice of KeyValue.
@@ -25,11 +30,68 @@ func ihash(key string) int {
 }
 
 
+func doMap(filename string, workerI int, nReduce int, mapf func (string, string) []KeyValue) {
+  file, err := os.Open(filename)
+  if(err != nil) {
+    log.Fatalf("cannot open %v", filename)
+  }
+
+  content, err := io.ReadAll(file)
+
+  if(err != nil) {
+    log.Fatalf("cannot read %v", filename)
+  }
+
+  kva := mapf(filename, string(content))
+
+  splitKva := make([][]KeyValue, nReduce)
+  
+  for _, kv := range(kva) {
+    reduceI := ihash(kv.Key) % nReduce
+    splitKva[reduceI] = append(splitKva[reduceI], kv)
+  }
+
+  for i := 0; i < nReduce; i++ {
+    // write the partitioned kvs.
+    outname := fmt.Sprintf("mr-%v-%v", workerI, i)
+
+    // os.
+		file, err := os.Create(outname)
+    if err != nil {
+      fmt.Println(err)
+      log.Fatalf("could not open %s", outname)
+    }
+
+    j, _ := json.Marshal(splitKva[i])
+    file.Write(j)
+  }
+}
+
+func doReduce(reply *GetTaskReply, reducef func(string, []string) string) {
+  fmt.Println("reducing!!!")
+}
 //
 // main/mrworker.go calls this function.
-//
+// this is just a function. (no struct or anything.)
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+  args  := GetTaskArgs{}
+  reply := GetTaskReply{}
+  call("Coordinator.GetTask", &args, &reply)
+
+  if reply.TaskType == Map {
+    doMap(reply.File, reply.WorkerI, reply.NReduce, mapf)
+    time.Sleep(5 * time.Second)
+    args := FinishMapArgs{}
+    reply := FinishMapReply{}
+    call("Coordinator.FinishMap", &args, &reply)
+    return
+  }
+
+  if reply.TaskType == Reduce {
+    doReduce(&reply, reducef)
+  }
+
 
 	// Your worker implementation here.
 

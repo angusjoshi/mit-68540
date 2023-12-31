@@ -14,6 +14,35 @@ import "strconv"
 // and reply for an RPC.
 //
 
+type taskType int
+const (
+  Map taskType = iota
+  Reduce
+)
+
+type GetTaskArgs struct {
+
+}
+
+type GetTaskReply struct {
+  TaskType taskType
+  File string
+  WorkerI int
+  NMaps int
+  NReduce int
+}
+
+type FinishMapArgs struct {
+
+}
+
+type FinishMapReply struct {
+  TaskType taskType
+  File string
+  WorkerI int
+  NMaps int
+}
+
 type ExampleArgs struct {
 	X int
 }
