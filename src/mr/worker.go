@@ -7,8 +7,8 @@ import (
 	"log"
 	"net/rpc"
 	"os"
-	"time"
   "encoding/json"
+  "sort"
 )
 
 //
@@ -19,6 +19,13 @@ type KeyValue struct {
 	Value string
 }
 
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 //
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -53,7 +60,7 @@ func doMap(filename string, workerI int, nReduce int, mapf func (string, string)
 
   for i := 0; i < nReduce; i++ {
     // write the partitioned kvs.
-    outname := fmt.Sprintf("mr-%v-%v", workerI, i)
+    outname := fmt.Sprintf("mr-tmp/mr-%v-%v", workerI, i)
 
     // os.
 		file, err := os.Create(outname)
@@ -69,6 +76,58 @@ func doMap(filename string, workerI int, nReduce int, mapf func (string, string)
 
 func doReduce(reply *GetTaskReply, reducef func(string, []string) string) {
   fmt.Println("reducing!!!")
+  // workerI is the reduce index
+  // nMaps is the limit on map indides.
+  workerI := reply.WorkerI // the index of the 
+
+  all := make([]KeyValue, 0)
+  for i := 0; i < reply.NMaps; i++ {
+    filename  := fmt.Sprintf("mr-tmp/mr-%v-%v", i, workerI)
+    f, err := os.Open(filename)
+
+    if err != nil {
+      log.Fatalf("could not open file %s", filename)
+    }
+
+    d, err := io.ReadAll(f)
+
+    if err != nil {
+      log.Fatalf("could not read file %s", filename)
+    }
+
+    var dm []KeyValue
+    err = json.Unmarshal(d, &dm)
+    all = append(all, dm...)
+  }
+
+	sort.Sort(ByKey(all))
+
+	oname := fmt.Sprintf("mr-out-%v", workerI)
+	ofile, _ := os.Create(oname)
+
+	//
+	// call Reduce on each distinct key in intermediate[],
+	// and print the result to mr-out-0.
+	//
+	i := 0
+	for i < len(all) {
+		j := i + 1
+		for j < len(all) && all[j].Key == all[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, all[k].Value)
+		}
+		output := reducef(all[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", all[i].Key, output)
+
+		i = j
+	}
+
+	ofile.Close()
 }
 //
 // main/mrworker.go calls this function.
@@ -81,7 +140,6 @@ func Worker(mapf func(string, string) []KeyValue,
 
   if reply.TaskType == Map {
     doMap(reply.File, reply.WorkerI, reply.NReduce, mapf)
-    time.Sleep(5 * time.Second)
     args := FinishMapArgs{}
     reply := FinishMapReply{}
     call("Coordinator.FinishMap", &args, &reply)
