@@ -55,9 +55,7 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 func (c *Coordinator) FinishReduce(args *FinishReduceArgs, reply *FinishReduceReply) error {
   c.m.Lock()
   c.nReduce--
-  if !c.finishedReds[args.I] {
-    c.finishedReds[args.I] = true
-  }
+  c.finishedReds[args.I] = true
   c.m.Unlock()
   return nil
 }
@@ -65,9 +63,7 @@ func (c *Coordinator) FinishReduce(args *FinishReduceArgs, reply *FinishReduceRe
 func (c *Coordinator) FinishMap(args *FinishMapArgs, reply *FinishMapReply) error {
   c.m.Lock()
   c.nMap--
-  if !c.finishedMaps[args.I] {
-    c.finishedMaps[args.I] = true
-  }
+  c.finishedMaps[args.I] = true
   c.m.Unlock()
   return nil
 }
@@ -78,7 +74,7 @@ func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
   c.m.Lock()
   for c.nMap > 0 {
     // map task
-    if !(len(c.mapQueue) > 0) {
+    if len(c.mapQueue) == 0 {
       c.m.Unlock()
       time.Sleep(200 * time.Millisecond)
       c.m.Lock()
@@ -109,7 +105,7 @@ func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 
   c.m.Lock()
   for c.nReduce > 0 {
-    if !(len(c.reduceQueue) > 0) {
+    if len(c.reduceQueue) == 0 {
       c.m.Unlock()
       time.Sleep(200 * time.Millisecond)
       c.m.Lock()
@@ -187,8 +183,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
   c.finishedMaps = make(map[int]bool)
   c.finishedReds = make(map[int]bool)
-
-	// Your code here.
 
 	c.server()
 	return &c
