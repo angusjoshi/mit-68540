@@ -39,6 +39,7 @@ func ihash(key string) int {
 
 func doMap(filename string, workerI int, nReduce int, mapf func (string, string) []KeyValue) {
   file, err := os.Open(filename)
+
   if(err != nil) {
     log.Fatalf("cannot open %v", filename)
   }
@@ -60,29 +61,27 @@ func doMap(filename string, workerI int, nReduce int, mapf func (string, string)
 
   for i := 0; i < nReduce; i++ {
     // write the partitioned kvs.
-    outname := fmt.Sprintf("mr-tmp/mr-%v-%v", workerI, i)
+    outname := fmt.Sprintf("mr-%v-%v", workerI, i)
+    ofile, err := os.CreateTemp("./", "mr-")
 
     // os.
-		file, err := os.Create(outname)
     if err != nil {
       fmt.Println(err)
       log.Fatalf("could not open %s", outname)
     }
 
     j, _ := json.Marshal(splitKva[i])
-    file.Write(j)
+    ofile.Write(j)
+    os.Rename(ofile.Name(), outname)
   }
 }
 
 func doReduce(reply *GetTaskReply, reducef func(string, []string) string) {
-  fmt.Println("reducing!!!")
-  // workerI is the reduce index
-  // nMaps is the limit on map indides.
-  workerI := reply.WorkerI // the index of the 
+  workerI := reply.WorkerI 
 
   all := make([]KeyValue, 0)
   for i := 0; i < reply.NMaps; i++ {
-    filename  := fmt.Sprintf("mr-tmp/mr-%v-%v", i, workerI)
+    filename  := fmt.Sprintf("mr-%v-%v", i, workerI)
     f, err := os.Open(filename)
 
     if err != nil {
@@ -102,13 +101,8 @@ func doReduce(reply *GetTaskReply, reducef func(string, []string) string) {
 
 	sort.Sort(ByKey(all))
 
-	oname := fmt.Sprintf("mr-out-%v", workerI)
-	ofile, _ := os.Create(oname)
+  ofile, _ := os.CreateTemp("./", "mr-")
 
-	//
-	// call Reduce on each distinct key in intermediate[],
-	// and print the result to mr-out-0.
-	//
 	i := 0
 	for i < len(all) {
 		j := i + 1
@@ -121,66 +115,55 @@ func doReduce(reply *GetTaskReply, reducef func(string, []string) string) {
 		}
 		output := reducef(all[i].Key, values)
 
-		// this is the correct format for each line of Reduce output.
 		fmt.Fprintf(ofile, "%v %v\n", all[i].Key, output)
 
 		i = j
 	}
 
+	oname := fmt.Sprintf("mr-out-%v", workerI)
+  os.Rename(ofile.Name(), oname)
 	ofile.Close()
 }
+
 //
 // main/mrworker.go calls this function.
 // this is just a function. (no struct or anything.)
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-  args  := GetTaskArgs{}
-  reply := GetTaskReply{}
-  call("Coordinator.GetTask", &args, &reply)
+  for {
+    args  := GetTaskArgs{}
+    reply := GetTaskReply{}
+    call("Coordinator.GetTask", &args, &reply)
 
-  if reply.TaskType == Map {
-    doMap(reply.File, reply.WorkerI, reply.NReduce, mapf)
-    args := FinishMapArgs{}
-    reply := FinishMapReply{}
-    call("Coordinator.FinishMap", &args, &reply)
-    return
+    if reply.Done {
+      return
+    }
+
+    if reply.TaskType == Map {
+      doMap(reply.File, reply.WorkerI, reply.NReduce, mapf)
+      args := FinishMapArgs{}
+      args.I = reply.WorkerI
+      reply := FinishMapReply{}
+      call("Coordinator.FinishMap", &args, &reply)
+    }
+
+    if reply.TaskType == Reduce {
+      doReduce(&reply, reducef)
+      args := FinishReduceArgs{}
+      args.I = reply.WorkerI
+      reply := FinishReduceReply{}
+      call("Coordinator.FinishReduce", &args, &reply)
+    }
   }
-
-  if reply.TaskType == Reduce {
-    doReduce(&reply, reducef)
-  }
-
-
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
-
 }
 
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
 func CallExample() {
 
-	// declare an argument structure.
 	args := ExampleArgs{}
-
-	// fill in the argument(s).
 	args.X = 99
-
-	// declare a reply structure.
 	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
-		// reply.Y should be 100.
 		fmt.Printf("reply.Y %v\n", reply.Y)
 	} else {
 		fmt.Printf("call failed!\n")

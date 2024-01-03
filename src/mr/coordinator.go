@@ -1,24 +1,45 @@
 package mr
 
-import "log"
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
-import "sync"
-import "fmt"
+import (
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
+	"sync"
+	"time"
+)
+
+type stack []int
+
+func (s *stack) pop() int {
+  x := (*s)[len(*s) - 1]
+  (*s)[len(*s) - 1] = 0
+  *s = (*s)[:len(*s) - 1]
+  return x 
+}
+func(s *stack) contains(i int) bool {
+  for _, x := range(*s) {
+    if(x == i) {
+      return true
+    }
+  } 
+  return false
+}
 
 type Coordinator struct {
 	// Your definitions here.
+  finishedMaps map[int]bool
+  finishedReds map[int]bool
+  mapQueue stack
+  reduceQueue stack
   toMap []int
-  i int
-  j int
   files []string
   m sync.Mutex
-  nMaps int
+  totalMap int
+  nMap int
   nReduce int
-  mapWg sync.WaitGroup
-  redWg sync.WaitGroup
+  done bool
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -31,35 +52,94 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	return nil
 }
 
+func (c *Coordinator) FinishReduce(args *FinishReduceArgs, reply *FinishReduceReply) error {
+  c.m.Lock()
+  c.nReduce--
+  if !c.finishedReds[args.I] {
+    c.finishedReds[args.I] = true
+  }
+  c.m.Unlock()
+  return nil
+}
+
 func (c *Coordinator) FinishMap(args *FinishMapArgs, reply *FinishMapReply) error {
-  c.mapWg.Done()
-  fmt.Println("asdfasdf")
+  c.m.Lock()
+  c.nMap--
+  if !c.finishedMaps[args.I] {
+    c.finishedMaps[args.I] = true
+  }
+  c.m.Unlock()
   return nil
 }
 
 func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
+  reply.Done = false
+
   c.m.Lock()
-  if c.i < c.nMaps {
+  for c.nMap > 0 {
     // map task
-    reply.File = c.files[c.i]
+    if !(len(c.mapQueue) > 0) {
+      c.m.Unlock()
+      time.Sleep(200 * time.Millisecond)
+      c.m.Lock()
+      continue
+    }
+
+    i := c.mapQueue.pop()
+    reply.File = c.files[i]
     reply.TaskType = Map
-    reply.WorkerI = c.i
+    reply.WorkerI = i
     reply.NReduce = c.nReduce
-    c.i++
+
+    c.finishedMaps[i] = false
+
+    go func() {
+      time.Sleep(10 * time.Second)
+      c.m.Lock()
+      if !c.finishedMaps[i] {
+        c.mapQueue = append(c.mapQueue, i)
+      }
+      c.m.Unlock()
+    }()
+
+    c.m.Unlock()
+    return nil
+  }
+  c.m.Unlock()
+
+  c.m.Lock()
+  for c.nReduce > 0 {
+    if !(len(c.reduceQueue) > 0) {
+      c.m.Unlock()
+      time.Sleep(200 * time.Millisecond)
+      c.m.Lock()
+      continue
+    }
+    // reduce task
+    j := c.reduceQueue.pop()
+    reply.TaskType = Reduce
+    reply.NMaps = c.totalMap
+    reply.WorkerI = j
+
+    c.finishedReds[j] = false
+    go func() {
+      time.Sleep(10 * time.Second)
+      c.m.Lock()
+      if !c.finishedReds[j] {
+        c.reduceQueue = append(c.reduceQueue, j)
+      }
+      c.m.Unlock()
+    }()
+
     c.m.Unlock()
     return nil
   }
 
   c.m.Unlock()
-  c.mapWg.Wait()
 
-  reply.TaskType = Reduce
-  reply.NMaps = c.nMaps
-
-  c.m.Lock()
-  reply.WorkerI = c.j
-  c.j++
-  c.m.Unlock()
+  // all tasks finished
+  c.done = true
+  reply.Done = true
   return nil
 }
 
@@ -80,12 +160,7 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
-	// ret := true
-
-	// Your code here.
-
-	return ret
+  return c.done
 }
 
 // create a Coordinator.
@@ -94,14 +169,24 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
   c.files = files
-  c.nMaps = len(files)
-  c.mapWg.Add(c.nMaps)
+  c.nMap = len(files)
+  c.totalMap = c.nMap
   c.nReduce = nReduce
-  fmt.Println(c.nMaps)
+  c.done = false
 
-	for _, file := range files {
-		fmt.Println(file)
-	}
+
+  c.mapQueue = make([]int, c.nMap)
+  c.reduceQueue = make([]int, nReduce)
+  for i := 0; i < c.nMap; i++ {
+    c.mapQueue[i] = i
+  }
+
+  for i := 0; i < nReduce; i++ {
+    c.reduceQueue[i] = i
+  }
+
+  c.finishedMaps = make(map[int]bool)
+  c.finishedReds = make(map[int]bool)
 
 	// Your code here.
 

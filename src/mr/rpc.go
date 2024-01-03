@@ -23,24 +23,27 @@ const (
 type GetTaskArgs struct {
 
 }
-
 type GetTaskReply struct {
   TaskType taskType
   File string
   WorkerI int
   NMaps int
   NReduce int
+  Done bool
+}
+
+type FinishReduceArgs struct {
+  I int
+}
+
+type FinishReduceReply struct {
 }
 
 type FinishMapArgs struct {
-
+  I int
 }
 
 type FinishMapReply struct {
-  TaskType taskType
-  File string
-  WorkerI int
-  NMaps int
 }
 
 type ExampleArgs struct {
