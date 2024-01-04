@@ -298,16 +298,16 @@ func (rf *Raft) ticker() {
 }
 
 func (rf *Raft) Heartbeat() {
-  for i, _ := range(rf.peers) {
+  for i := range(rf.peers) {
     if i == rf.me {
       continue
     }
 
-    go func() {
+    go func(i int) {
       args := AppendEntriesArgs{ SourceI: i, Term: rf.currentTerm }
       reply := AppendEntriesReply{}
       rf.sendAppendEntries(i, &args, &reply)
-    }()
+    }(i)
   }
 }
 
