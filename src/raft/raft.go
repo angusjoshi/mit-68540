@@ -72,8 +72,11 @@ type Raft struct {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
+  rf.mu.Lock()
+  term, leader := rf.currentTerm, rf.isLeader
+  rf.mu.Unlock()
 
-	return rf.currentTerm, rf.isLeader
+	return term, leader
 }
 
 // save Raft's persistent state to stable storage,
@@ -275,8 +278,10 @@ func (rf *Raft) ticker() {
       rf.votes = 1
       for i := range(rf.peers) {
         go func(i int) {
+          rf.mu.Lock()
           args := RequestVoteArgs{ Term: rf.currentTerm, I: rf.me }
           reply := RequestVoteReply{}
+          rf.mu.Unlock()
           rf.sendRequestVote(i, &args, &reply)
           if reply.Yes {
             rf.mu.Lock()
@@ -284,12 +289,14 @@ func (rf *Raft) ticker() {
 
             if rf.votes > len(rf.peers) / 2 {
               rf.isLeader = true
+              rf.Heartbeat()
             }
             rf.mu.Unlock()
           }
         }(i)
       }
     }
+
 
     rf.mu.Unlock()
 
@@ -307,8 +314,10 @@ func (rf *Raft) Heartbeat() {
     }
 
     go func(i int) {
+      rf.mu.Lock()
       args := AppendEntriesArgs{ SourceI: i, Term: rf.currentTerm }
       reply := AppendEntriesReply{}
+      rf.mu.Unlock()
       rf.sendAppendEntries(i, &args, &reply)
     }(i)
   }
@@ -334,6 +343,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
   rf.currentTerm = 0
 
+  // thread to send heartbeats if i am leader
   go func() {
     for {
       rf.mu.Lock()
@@ -345,6 +355,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
     }
   }()
 
+  // thread to start elections if not received heartbeat
   go func() {
     for {
 		  ms := 1500
