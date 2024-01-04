@@ -152,6 +152,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
     rf.votedFor = args.I
     rf.currentTerm = args.Term
     rf.isLeader = false
+    rf.startElection = false
     return
   }
 
@@ -174,6 +175,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
   if rf.isLeader && rf.currentTerm < args.Term {
     rf.isLeader = false
     rf.currentTerm = args.Term
+    rf.startElection = false
   }
 
   rf.hasHadBeat = true
@@ -263,15 +265,18 @@ func (rf *Raft) ticker() {
 	for rf.killed() == false {
 
 		// Your code here (2A)
-		// Check if a leader election should be started.
 
     rf.mu.Lock()
-    if rf.startElection {
+    if !rf.isLeader && rf.startElection {
+      // increment the term and send a vote request to each other peer.
+      // also handles when i get a majority.
       rf.currentTerm++
+      rf.votedFor = rf.me
+      rf.votes = 1
       for i := range(rf.peers) {
-        args := RequestVoteArgs{ Term: rf.currentTerm, I: rf.me }
-        reply := RequestVoteReply{}
         go func(i int) {
+          args := RequestVoteArgs{ Term: rf.currentTerm, I: rf.me }
+          reply := RequestVoteReply{}
           rf.sendRequestVote(i, &args, &reply)
           if reply.Yes {
             rf.mu.Lock()
@@ -288,10 +293,9 @@ func (rf *Raft) ticker() {
 
     rf.mu.Unlock()
 
-
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
+		ms := 1000 + (rand.Int63() % 500)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
@@ -325,6 +329,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+  rf.hasHadBeat = true
 
 	// Your initialization code here (2A, 2B, 2C).
   rf.currentTerm = 0
@@ -342,16 +347,19 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
   go func() {
     for {
+		  ms := 1500
+		  time.Sleep(time.Duration(ms) * time.Millisecond)
       rf.mu.Lock()
       if !rf.isLeader {
         if !rf.hasHadBeat {
           rf.startElection = true
+        } else {
+          rf.startElection = false
         }
 
         rf.hasHadBeat = false
       }
       rf.mu.Unlock()
-      time.Sleep(150 * time.Millisecond)
     }
   }()
 
